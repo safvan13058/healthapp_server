@@ -423,73 +423,116 @@ router.get('/details/:hospital_id', optionalAuth, async (req, res) => {
   }
 });
 
-router.get('/hospitals/:hospitalId/doctors',optionalAuth, async (req, res) => {
-  const { hospitalId } = req.params;
-  const {
-    department_id,
-    name,
-    page = 1,
-    limit = 10
-  } = req.query;
+router.get(
+  '/hospitals/:hospitalId/doctors',
+  optionalAuth,
+  async (req, res) => {
+    console.log("working")
+    const { hospitalId } = req.params;
+    let {
+      department_id,
+      name,
+      page = 1,
+      limit = 10
+    } = req.query;
 
-  const offset = (page - 1) * limit;
-  const user_id = req.user?.id || null;
+    // parse pagination and ids safely
+    page = parseInt(page, 10) || 1;
+    limit = parseInt(limit, 10) || 10;
+    const offset = (page - 1) * limit;
+    const user_id = req.user?.id || null;
+    const hid = parseInt(hospitalId, 10);
 
-  try {
-    let values = [];
-    let baseQuery = `
-      SELECT 
-        d.*, 
-        hd.name AS department_name,
-        ${user_id ? `CASE WHEN fd.id IS NOT NULL THEN true ELSE false END AS is_favorite` : `false AS is_favorite`}
-      FROM doctors d
-      JOIN doctor_departments dd ON dd.doctor_id = d.id
-      JOIN hospital_departments hd ON dd.department_id = hd.id
-      ${user_id ? `
-        LEFT JOIN favorite_doctors fd 
-        ON fd.doctor_id = d.id AND fd.user_id = ? AND fd.hospital_id = d.hospital_id
-      ` : ''}
-      WHERE d.hospital_id = ?
-    `;
-
-    if (user_id) values.push(user_id);
-    values.push(hospitalId);
-
-    if (department_id) {
-      baseQuery += ' AND hd.id = ?';
-      values.push(department_id);
+    if (Number.isNaN(hid)) {
+      return res.status(400).json({ success: false, error: 'Invalid hospitalId' });
     }
 
-    if (name) {
-      baseQuery += ' AND d.name LIKE ?';
-      values.push(`%${name}%`);
+    try {
+      // Build SELECT clause
+      const selectCols = [
+        'd.id',
+        'd.name',
+        'd.specialization',
+        'd.phone_number',
+        'd.email',
+        'd.image_url',
+        'hd.name AS department_name',
+        user_id ? 'CASE WHEN fd.id IS NOT NULL THEN TRUE ELSE FALSE END AS is_favorite' : 'FALSE AS is_favorite'
+      ].join(', ');
+
+      // Base FROM / JOINs
+      let baseFrom = `
+        FROM doctors d
+        JOIN doctor_hospitals dh ON dh.doctor_id = d.id
+        LEFT JOIN doctor_departments dd ON dd.doctor_id = d.id
+        LEFT JOIN hospital_departments hd ON dd.department_id = hd.id
+      `;
+
+      // Favorite join only when user_id exists (prevents extra param)
+      let favoriteJoin = '';
+      if (user_id) {
+        favoriteJoin = `LEFT JOIN favorite_doctors fd ON fd.doctor_id = d.id AND fd.user_id = ? AND fd.hospital_id = dh.hospital_id`;
+      }
+
+      // WHERE clauses and values array (parameters in order)
+      const whereClauses = ['dh.hospital_id = ?'];
+      const valuesForWhere = [];
+
+      if (user_id) valuesForWhere.push(user_id);
+      valuesForWhere.push(hid);
+
+      if (department_id) {
+        // allow department_id from query strings (string -> int)
+        const deptId = parseInt(department_id, 10);
+        if (Number.isNaN(deptId)) {
+          return res.status(400).json({ success: false, error: 'Invalid department_id' });
+        }
+        whereClauses.push('hd.id = ?');
+        valuesForWhere.push(deptId);
+      }
+
+      if (name) {
+        whereClauses.push('d.name LIKE ?');
+        valuesForWhere.push(`%${name}%`);
+      }
+
+      const whereSQL = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+      // Count total distinct doctors
+      const countSQL = `SELECT COUNT(DISTINCT d.id) AS total ${baseFrom} ${favoriteJoin} ${whereSQL}`;
+      const [countRows] = await db.query(countSQL, valuesForWhere);
+      const total = countRows[0]?.total || 0;
+
+      // Data query: select distinct doctors and group to avoid duplicates due to joins
+      const dataSQL = `
+        SELECT ${selectCols}
+        ${baseFrom}
+        ${favoriteJoin}
+        ${whereSQL}
+        GROUP BY d.id
+        ORDER BY d.name ASC
+        LIMIT ? OFFSET ?
+      `;
+
+      // valuesForWhere plus pagination params
+      const dataValues = valuesForWhere.slice(); // copy
+      dataValues.push(limit, offset);
+
+      const [rows] = await db.query(dataSQL, dataValues);
+
+      res.json({
+        success: true,
+        page,
+        limit,
+        total,
+        doctors: rows
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ success: false, error: 'Failed to fetch doctors' });
     }
-
-    // Count total
-    const [countRows] = await db.query(
-      `SELECT COUNT(*) AS total FROM (${baseQuery}) AS filtered`,
-      values
-    );
-    const total = countRows[0]?.total || 0;
-
-    // Pagination
-    baseQuery += ' LIMIT ? OFFSET ?';
-    values.push(parseInt(limit), parseInt(offset));
-
-    const [doctors] = await db.query(baseQuery, values);
-
-    res.json({
-      success: true,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      total,
-      doctors
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, error: 'Failed to fetch doctors' });
   }
-});
+);
 
 
 
@@ -499,83 +542,102 @@ router.get('/hospitals/:hospitalId/doctors',optionalAuth, async (req, res) => {
 router.get('/hospitals/:hospitalId/doctors/:doctorId/details', async (req, res) => {
   const { hospitalId, doctorId } = req.params;
 
+  // basic validation
+  const hid = parseInt(hospitalId, 10);
+  const did = parseInt(doctorId, 10);
+  if (Number.isNaN(hid) || Number.isNaN(did)) {
+    return res.status(400).json({ success: false, message: 'Invalid hospitalId or doctorId' });
+  }
+
   try {
-    const [doctorRows] = await db.query(`
-      SELECT d.*, 
-             h.name AS hospital_name,
-             h.address AS hospital_address,
-             h.phone_number AS hospital_phone,
-             h.email AS hospital_email,
-             dept.id AS department_id,
-             dept.name AS department_name
+    // Get doctor + hospital + hospital-specific department (if any) using doctor_hospitals mapping
+    const [doctorRows] = await db.query(
+      `
+      SELECT 
+        d.id AS doctor_id,
+        d.name AS doctor_name,
+        d.specialization,
+        d.phone_number,
+        d.email,
+        d.image_url,
+        dh.hospital_id,
+        dh.hospital_department_id,
+        h.name AS hospital_name,
+        h.address AS hospital_address,
+        h.phone_number AS hospital_phone,
+        h.email AS hospital_email,
+        hd.id AS department_id,
+        hd.name AS department_name
       FROM doctors d
-      LEFT JOIN hospitals h ON d.hospital_id = h.id
-      LEFT JOIN doctor_departments dd ON d.id = dd.doctor_id
-      LEFT JOIN hospital_departments dept ON dd.department_id = dept.id
-      WHERE d.id = ? AND d.hospital_id = ?
-    `, [doctorId, hospitalId]);
+      JOIN doctor_hospitals dh ON dh.doctor_id = d.id
+      JOIN hospitals h ON dh.hospital_id = h.id
+      LEFT JOIN hospital_departments hd ON dh.hospital_department_id = hd.id
+      WHERE d.id = ? AND dh.hospital_id = ?
+      LIMIT 1
+      `,
+      [did, hid]
+    );
 
     if (doctorRows.length === 0) {
       return res.status(404).json({ success: false, message: 'Doctor not found for this hospital.' });
     }
 
-    const doc = doctorRows[0];
+    const row = doctorRows[0];
 
+    // Build doctor object
     const doctor = {
-      id: doc.id,
-      name: doc.name,
-      email: doc.email,
-      phone: doc.phone,
-      experience: doc.experience,
-      specialization: doc.specialization,
-      profile_image_url: doc.profile_image_url || null,
+      id: row.doctor_id,
+      name: row.doctor_name,
+      email: row.email,
+      phone_number: row.phone_number,
+      specialization: row.specialization,
+      profile_image_url: row.image_url || null,
       hospital: {
-        id: doc.hospital_id,
-        name: doc.hospital_name,
-        address: doc.hospital_address,
-        phone: doc.hospital_phone,
-        email: doc.hospital_email
+        id: row.hospital_id,
+        name: row.hospital_name,
+        address: row.hospital_address,
+        phone: row.hospital_phone,
+        email: row.hospital_email
       },
-      departments: doctorRows.map(row => ({
+      // department is hospital-specific (may be null)
+      departments: row.department_id ? [{
         id: row.department_id,
         name: row.department_name
-      })).filter(dep => dep.id)
+      }] : []
     };
 
-    const [schedules] = await db.query(`
-      SELECT id, day_of_week, start_time, end_time, notes
-      FROM doctor_schedules
-      WHERE doctor_id = ?
-    `, [doctorId]);
+    // schedules (assuming doctor_schedules.doctor_id)
+    const [schedules] = await db.query(
+      `SELECT id, day_of_week, start_time, end_time, notes
+       FROM doctor_schedules
+       WHERE doctor_id = ?
+       ORDER BY FIELD(day_of_week, 'Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'), start_time`,
+      [did]
+    );
 
-    const [reviews] = await db.query(`
-      SELECT id, patient_name, rating, comment, created_at
-      FROM doctor_reviews
-      WHERE doctor_id = ?
-      ORDER BY created_at DESC
-    `, [doctorId]);
+    // reviews
+    const [reviews] = await db.query(
+      `SELECT id, patient_name, rating, comment, created_at
+       FROM doctor_reviews
+       WHERE doctor_id = ?
+       ORDER BY created_at DESC`,
+      [did]
+    );
 
     const averageRating = reviews.length
-      ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1)
+      ? (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
       : null;
 
-    const [fees] = await db.query(`
-      SELECT consultation_fee
-      FROM doctor_fees
-      WHERE doctor_id = ?
-      LIMIT 1
-    `, [doctorId]);
+    // fees
+    const [fees] = await db.query(
+      `SELECT consultation_fee
+       FROM doctor_fees
+       WHERE doctor_id = ?
+       LIMIT 1`,
+      [did]
+    );
 
-    const consultation_fee = fees[0]?.consultation_fee || null;
-
-    // const [appointments] = await db.query(`
-    //   SELECT id, patient_name, appointment_date, appointment_time, status
-    //   FROM appointments
-    //   WHERE doctor_id = ?
-    //     AND appointment_date >= CURDATE()
-    //   ORDER BY appointment_date, appointment_time
-    //   LIMIT 10
-    // `, [doctorId]);
+    const consultation_fee = fees[0]?.consultation_fee ?? null;
 
     res.json({
       success: true,
@@ -585,16 +647,15 @@ router.get('/hospitals/:hospitalId/doctors/:doctorId/details', async (req, res) 
         average_rating: averageRating,
         total_reviews: reviews.length,
         schedules,
-        reviews,
-        // upcoming_appointments: appointments
+        reviews
       }
     });
-
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
 
 
 
@@ -1161,6 +1222,7 @@ router.get('/favorites/all', authMiddleware, async (req, res) => {
          d.name AS doctor_name,
          d.email AS doctor_email,
          d.phone_number AS doctor_phone,
+         d.image_url AS image_url,
          h.name AS hospital_name,
          h.address AS hospital_address,
          fd.created_at

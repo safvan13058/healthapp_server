@@ -5,7 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const db = require('../db');
 
-const fs =require ('fs');
+const fs = require('fs');
 
 // Define upload path
 const uploadPath = path.join(__dirname, 'uploads', 'doctor_images');
@@ -53,7 +53,7 @@ router.post('/departments', authMiddleware, checkRole('admin', 'hospital'), asyn
 router.post(
   '/hospitals/:id/images',
   authMiddleware,
-  checkRole('admin','hospital'),
+  checkRole('admin', 'hospital'),
   upload.array('images', 10), // up to 10 images
   async (req, res) => {
     const hospitalId = req.params.id;
@@ -163,80 +163,99 @@ router.post(
   checkRole('admin', 'hospital'),
   upload.single('image'),
   async (req, res) => {
-    const { name, specialization, phone_number, email, department_id, hospitalIds } = req.body;
-    const imageFile = req.file;
-
-    if (!name || !hospitalIds || hospitalIds.length === 0) {
-      return res.status(400).json({ message: 'Name and hospitalIds are required' });
-    }
-
-    const connection = await db.getConnection();
     try {
-      await connection.beginTransaction();
+      const trim = s => (typeof s === 'string' ? s.trim() : s);
 
-      // Step 1: Check if user exists (doctor account)
-      let [existingUsers] = await connection.query(
+      const name = trim(req.body.name);
+      const specialization = trim(req.body.specialization);
+      const phone_number = trim(req.body.phone_number);
+      const email = trim(req.body.email);
+      const department_id = req.body.department_id;
+      const hospitalId = req.body.hospitalIds; // now single value
+      const imageFile = req.file;
+
+      // Step 1: Check if user exists
+      const [existingUsers] = await db.query(
         'SELECT id FROM users WHERE email = ? OR phone_number = ?',
         [email, phone_number]
       );
-
       if (existingUsers.length === 0) {
-        await connection.query(
+        await db.query(
           'INSERT INTO users (username, password, role, email, phone_number) VALUES (?, ?, ?, ?, ?)',
           [name.toLowerCase().replace(/\s+/g, ''), 'defaultpassword', 'doctor', email, phone_number]
         );
       }
 
       // Step 2: Check if doctor exists
-      let [existingDoctor] = await connection.query('SELECT id FROM doctors WHERE email = ?', [email]);
+      const [existingDoctor] = await db.query(
+        'SELECT id FROM doctors WHERE email = ?',
+        [email]
+      );
       let doctorId;
-
       if (existingDoctor.length > 0) {
         doctorId = existingDoctor[0].id;
       } else {
-        const [result] = await connection.query(
-          'INSERT INTO doctors (name, specialization, phone_number, email) VALUES (?, ?, ?, ?)',
-          [name, specialization, phone_number, email]
+        let imageUrl = null;
+        if (imageFile) {
+          imageUrl = `/uploads/doctor_images/${imageFile.filename}`;
+        }
+        const [result] = await db.query(
+          'INSERT INTO doctors (name, specialization, phone_number, email, image_url) VALUES (?, ?, ?, ?, ?)',
+          [name, specialization, phone_number, email, imageUrl]
         );
         doctorId = result.insertId;
       }
 
-      // Step 3: Map to hospitals
-
-      await connection.query(
-        'INSERT IGNORE INTO doctor_hospitals (doctor_id, hospital_id) VALUES (?, ?)',
-        [doctorId, hospitalIds]
+      // Step 3: Map to hospital (check before insert)
+      const [[exists]] = await db.query(
+        'SELECT 1 FROM doctor_hospitals WHERE doctor_id = ? AND hospital_id = ? LIMIT 1',
+        [doctorId, hospitalId]
       );
+      if (!exists) {
+        await db.query(
+          'INSERT INTO doctor_hospitals (doctor_id, hospital_id,hospital_department_id) VALUES (?, ?,?)',
+          [doctorId, hospitalId,department_id]
+        );
+      }
 
-
-      // Step 4: Map to department (optional)
+      // Step 4: Map to department
       if (department_id) {
-        await connection.query(
-          'INSERT IGNORE INTO doctor_departments (doctor_id, department_id) VALUES (?, ?)',
+        const [[deptExists]] = await db.query(
+          'SELECT 1 FROM doctor_departments WHERE doctor_id = ? AND department_id = ? LIMIT 1',
           [doctorId, department_id]
         );
+        if (!deptExists) {
+          await db.query(
+            'INSERT INTO doctor_departments (doctor_id, department_id) VALUES (?, ?)',
+            [doctorId, department_id]
+          );
+        }
       }
 
       // Step 5: Save image
       if (imageFile) {
         const imageUrl = `/uploads/doctor_images/${imageFile.filename}`;
-        await connection.query(
+        // Update main table image_url if missing
+        await db.query(
+          'UPDATE doctors SET image_url = ? WHERE id = ? AND (image_url IS NULL OR image_url = "")',
+          [imageUrl, doctorId]
+        );
+        // Insert into images table
+        await db.query(
           'INSERT INTO doctor_images (doctor_id, image_url, description) VALUES (?, ?, ?)',
           [doctorId, imageUrl, req.body.description || null]
         );
       }
 
-      await connection.commit();
-      res.json({ success: true, message: 'Doctor created and mapped successfully.' });
+      res.json({ success: true, message: 'Doctor created and mapped successfully.', doctorId });
     } catch (err) {
-      await connection.rollback();
       console.error(err);
-      res.status(500).json({ success: false, message: 'Failed to create doctor.' });
-    } finally {
-      connection.release();
+      res.status(500).json({ success: false, message: 'Failed to create doctor.', error: err.message });
     }
   }
 );
+
+
 
 // Get doctors by hospital ID
 router.get('/hospitals/:hospitalId/doctors', async (req, res) => {

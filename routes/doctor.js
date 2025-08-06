@@ -1,13 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const {authMiddleware,checkRole} = require('../middlewares/authMiddleware');
+const { authMiddleware, checkRole } = require('../middlewares/authMiddleware');
+const db = require('../db'); // ⬅️ Make sure this is included if not already
 
-router.get('/dashboard',authMiddleware, checkRole('doctor'), (req, res) => {
+// Doctor dashboard
+router.get('/dashboard', authMiddleware, checkRole('doctor'), (req, res) => {
+  console.log('[INFO] GET /dashboard - Doctor dashboard accessed by user:', req.user?.id || 'unknown');
   res.json({ message: 'Doctor dashboard', user: req.user });
 });
+
+// Get Appointments
 router.get('/appointments', async (req, res) => {
   const { hospital_id, doctor_id, page = 1, limit = 10 } = req.query;
   const offset = (page - 1) * limit;
+
+  console.log('[INFO] GET /appointments - Query params:', req.query);
 
   try {
     let filters = [];
@@ -54,6 +61,7 @@ router.get('/appointments', async (req, res) => {
 
     const [appointments] = await db.query(query, values);
 
+    console.log('[SUCCESS] GET /appointments - Returned', appointments.length, 'appointments');
     res.json({
       success: true,
       page: parseInt(page),
@@ -62,18 +70,21 @@ router.get('/appointments', async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error('[ERROR] GET /appointments -', err.message, err.stack);
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
 
+// Update Appointment Status
 router.put('/appointments/:id/status', async (req, res) => {
   const appointmentId = req.params.id;
   const { status } = req.body;
 
-  // Only allow predefined status values
+  console.log('[INFO] PUT /appointments/:id/status - Appointment ID:', appointmentId, 'Status:', status);
+
   const validStatuses = ['pending', 'completed', 'cancelled'];
   if (!validStatuses.includes(status)) {
+    console.warn('[WARN] PUT /appointments/:id/status - Invalid status:', status);
     return res.status(400).json({ success: false, message: 'Invalid status value' });
   }
 
@@ -84,12 +95,15 @@ router.put('/appointments/:id/status', async (req, res) => {
     );
 
     if (result.affectedRows === 0) {
+      console.warn('[WARN] PUT /appointments/:id/status - Appointment not found:', appointmentId);
       return res.status(404).json({ success: false, message: 'Appointment not found' });
     }
 
+    console.log('[SUCCESS] PUT /appointments/:id/status - Status updated to', status, 'for ID:', appointmentId);
     res.json({ success: true, message: `Status updated to ${status}` });
+
   } catch (err) {
-    console.error(err);
+    console.error('[ERROR] PUT /appointments/:id/status -', err.message, err.stack);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

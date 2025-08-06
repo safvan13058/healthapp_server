@@ -2,13 +2,13 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const { authMiddleware, checkRole,optionalAuth } = require('../middlewares/authMiddleware');
+const { authMiddleware, checkRole, optionalAuth } = require('../middlewares/authMiddleware');
 router.use(express.json());
+
 // GET all users
 // GET all users (mocked without DB)
 router.get('/', async (req, res) => {
-  console.log('GET /users route hit');
-
+  console.log('[INFO] GET /users - route hit');
   try {
     // 🧪 Mock data
     const rows = [
@@ -16,110 +16,16 @@ router.get('/', async (req, res) => {
       { id: 2, name: 'Bob', email: 'bob@example.com' }
     ];
 
-    console.log('Mock users sent:', rows);
+    console.log('[SUCCESS] GET /users - Mock users sent:', rows.length, 'users');
     res.json(rows);
   } catch (err) {
-    console.error('Unexpected error:', err);
+    console.error('[ERROR] GET /users - Unexpected error:', err && err.message, err && err.stack);
     res.status(500).json({ error: 'Unexpected error' });
   }
 });
 
-// router.get('/hospitals/nearby', async (req, res) => {
-//   const {
-//     latitude,
-//     longitude,
-//     radius = 10,
-//     page = 1,
-//     limit = 10,
-//     department // optional department filter
-//   } = req.query;
-
-//   if (!latitude || !longitude) {
-//     return res.status(400).json({ success: false, error: 'latitude and longitude are required' });
-//   }
-
-//   const offset = (page - 1) * limit;
-
-//   try {
-//     // Count total matching hospitals (for pagination)
-//     const [countResult] = await db.query(
-//       `SELECT COUNT(*) AS total FROM (
-//         SELECT h.id,
-//           (
-//             6371 * acos(
-//               cos(radians(?)) *
-//               cos(radians(h.latitude)) *
-//               cos(radians(h.longitude) - radians(?)) +
-//               sin(radians(?)) *
-//               sin(radians(h.latitude))
-//             )
-//           ) AS distance,
-//           GROUP_CONCAT(DISTINCT hd.name) AS department_names
-//         FROM hospitals h
-//         LEFT JOIN hospital_departments hd ON h.id = hd.hospital_id
-//         GROUP BY h.id
-//         HAVING distance <= ?
-//         ${department ? `AND department_names LIKE ?` : ''}
-//       ) AS sub`,
-//       department
-//         ? [latitude, longitude, latitude, radius, `%${department}%`]
-//         : [latitude, longitude, latitude, radius]
-//     );
-//     const total = countResult[0]?.total || 0;
-
-//     // Fetch hospitals with image and department info
-//     const [results] = await db.query(
-//       `SELECT h.*,
-//         (
-//           6371 * acos(
-//             cos(radians(?)) *
-//             cos(radians(h.latitude)) *
-//             cos(radians(h.longitude) - radians(?)) +
-//             sin(radians(?)) *
-//             sin(radians(h.latitude))
-//           )
-//         ) AS distance,
-//         GROUP_CONCAT(DISTINCT hi.image_url) AS image_urls,
-//         GROUP_CONCAT(DISTINCT hi.description) AS image_descriptions,
-//         GROUP_CONCAT(DISTINCT hd.name) AS department_names
-//       FROM hospitals h
-//       LEFT JOIN hospital_images hi ON h.id = hi.hospital_id
-//       LEFT JOIN hospital_departments hd ON h.id = hd.hospital_id
-//       GROUP BY h.id
-//       HAVING distance <= ?
-//       ${department ? `AND department_names LIKE ?` : ''}
-//       ORDER BY distance ASC
-//       LIMIT ? OFFSET ?`,
-//       department
-//         ? [latitude, longitude, latitude, radius, `%${department}%`, parseInt(limit), parseInt(offset)]
-//         : [latitude, longitude, latitude, radius, parseInt(limit), parseInt(offset)]
-//     );
-
-//     const hospitals = results.map(h => ({
-//       ...h,
-//       images: h.image_urls
-//         ? h.image_urls.split(',').map((url, i) => ({
-//           url,
-//           description: h.image_descriptions?.split(',')[i] || ''
-//         }))
-//         : [],
-//       departments: h.department_names ? h.department_names.split(',') : []
-//     }));
-
-//     res.json({
-//       success: true,
-//       page: parseInt(page),
-//       limit: parseInt(limit),
-//       total,
-//       hospitals
-//     });
-
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ success: false, error: 'Failed to fetch hospitals' });
-//   }
-// });
 router.get('/hospitals/nearby', optionalAuth, async (req, res) => {
+  console.log('[INFO] GET /hospitals/nearby - route hit. Query:', req.query);
   const {
     latitude,
     longitude,
@@ -130,6 +36,7 @@ router.get('/hospitals/nearby', optionalAuth, async (req, res) => {
   } = req.query;
 
   if (!latitude || !longitude) {
+    console.warn('[WARN] GET /hospitals/nearby - missing latitude or longitude');
     return res.status(400).json({ success: false, error: 'latitude and longitude are required' });
   }
 
@@ -161,6 +68,7 @@ router.get('/hospitals/nearby', optionalAuth, async (req, res) => {
     );
 
     const total = countResult[0]?.total || 0;
+    console.log('[INFO] GET /hospitals/nearby - total matching hospitals:', total);
 
     // Main hospital fetch
     const [results] = await db.query(
@@ -206,6 +114,7 @@ router.get('/hospitals/nearby', optionalAuth, async (req, res) => {
       departments: h.department_names ? h.department_names.split(',') : []
     }));
 
+    console.log('[SUCCESS] GET /hospitals/nearby - returned hospitals count:', hospitals.length);
     res.json({
       success: true,
       page: parseInt(page),
@@ -215,145 +124,27 @@ router.get('/hospitals/nearby', optionalAuth, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Error in /hospitals/nearby:', err);
+    console.error('[ERROR] GET /hospitals/nearby - Error:', err && err.message, err && err.stack);
     res.status(500).json({ success: false, error: 'Failed to fetch hospitals' });
   }
 });
 
-
-// router.get('/details/:hospital_id', async (req, res) => {
-
-//   const hospitalId = req.params.hospital_id;
-
-//   try {
-//     // 1. Basic hospital info
-//     const [hospitalRows] = await db.query('SELECT * FROM hospitals WHERE id = ?', [hospitalId]);
-//     if (hospitalRows.length === 0) {
-//       return res.status(404).json({ success: false, message: 'Hospital not found' });
-//     }
-//     const hospital = hospitalRows[0];
-
-//     // 2. Images
-//     const [images] = await db.query('SELECT id, image_url FROM hospital_images WHERE hospital_id = ?', [hospitalId]);
-
-//     // 3. Departments
-//     const [departments] = await db.query('SELECT * FROM hospital_departments WHERE hospital_id = ?', [hospitalId]);
-
-//     // 4. Doctors for this hospital via doctor_hospitals mapping
-//     // 4. Doctors for this hospital via doctor_hospitals mapping
-//     const [doctorMappings] = await db.query(`
-//   SELECT d.*, dh.hospital_department_id 
-//   FROM doctors d
-//   JOIN doctor_hospitals dh ON dh.doctor_id = d.id
-//   WHERE dh.hospital_id = ?
-// `, [hospitalId]);
-
-//     // 5. Group doctors by department from doctor_hospitals
-//     const doctorsByDept = {};
-//     doctorMappings.forEach(doctor => {
-//       const deptId = doctor.hospital_department_id;
-//       if (!doctorsByDept[deptId]) {
-//         doctorsByDept[deptId] = [];
-//       }
-//       doctorsByDept[deptId].push(doctor);
-//     });
-
-//     // 6. Add doctors to each department
-//     const departmentsWithDoctors = departments.map(dept => ({
-//       ...dept,
-//       doctors: doctorsByDept[dept.id] || [],
-//     }));
-
-//     return res.json({
-//       success: true,
-//       hospital: {
-//         ...hospital,
-//         images,
-//         departments: departmentsWithDoctors,
-//       },
-//     });
-
-//   } catch (err) {
-//     console.error('Error fetching hospital details:', err);
-//     res.status(500).json({ success: false, message: 'Server error' });
-//   }
-// });
-
-
-// Route: GET /hospitals/:hospitalId/doctors
-// router.get('/hospitals/:hospitalId/doctors', async (req, res) => {
-//   const { hospitalId } = req.params;
-//   const {
-//     department_id,
-//     name,
-//     page = 1,
-//     limit = 10
-//   } = req.query;
-
-//   const offset = (page - 1) * limit;
-
-//   try {
-//     let baseQuery = `
-//       SELECT d.*, hd.name AS department_name
-//       FROM doctors d
-//       JOIN doctor_departments dd ON dd.doctor_id = d.id
-//       JOIN hospital_departments hd ON dd.department_id = hd.id
-//       WHERE d.hospital_id = ?
-//     `;
-//     const values = [hospitalId];
-
-//     if (department_id) {
-//       baseQuery += ' AND hd.id = ?';
-//       values.push(department_id);
-//     }
-
-//     if (name) {
-//       baseQuery += ' AND d.name LIKE ?';
-//       values.push(`%${name}%`);
-//     }
-
-//     // Count total results
-//     const [countRows] = await db.query(
-//       `SELECT COUNT(*) AS total FROM (${baseQuery}) AS filtered`,
-//       values
-//     );
-//     const total = countRows[0]?.total || 0;
-
-//     // Add pagination
-//     baseQuery += ' LIMIT ? OFFSET ?';
-//     values.push(parseInt(limit), parseInt(offset));
-
-//     const [doctors] = await db.query(baseQuery, values);
-
-//     res.json({
-//       success: true,
-//       page: parseInt(page),
-//       limit: parseInt(limit),
-//       total,
-//       doctors
-//     });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ success: false, error: 'Failed to fetch doctors' });
-//   }
-// });
-
-
 router.get('/details/:hospital_id', optionalAuth, async (req, res) => {
   const hospitalId = req.params.hospital_id;
+  console.log('[INFO] GET /details/:hospital_id - route hit. hospitalId:', hospitalId);
   const userId = req.user?.id || null;
 
   try {
     // 1. Basic hospital info
     const [hospitalRows] = await db.query('SELECT * FROM hospitals WHERE id = ?', [hospitalId]);
     if (hospitalRows.length === 0) {
+      console.warn('[WARN] GET /details/:hospital_id - Hospital not found:', hospitalId);
       return res.status(404).json({ success: false, message: 'Hospital not found' });
     }
     let hospital = hospitalRows[0];
 
     // 2. Images
     const [images] = await db.query('SELECT id, image_url FROM hospital_images WHERE hospital_id = ?', [hospitalId]);
-
     // 3. Departments
     const [departments] = await db.query('SELECT * FROM hospital_departments WHERE hospital_id = ?', [hospitalId]);
 
@@ -367,22 +158,13 @@ router.get('/details/:hospital_id', optionalAuth, async (req, res) => {
 
     // 5. Check favorites if user is logged in
     const favoriteDoctorIds = new Set();
-    const isHospitalFavorite = false;
-
     if (userId) {
-      // Favorite doctors
-      const [favDoctors] = await db.query(
-        'SELECT doctor_id FROM favorite_doctors WHERE user_id = ?',
-        [userId]
-      );
+      const [favDoctors] = await db.query('SELECT doctor_id FROM favorite_doctors WHERE user_id = ?', [userId]);
       favDoctors.forEach(row => favoriteDoctorIds.add(row.doctor_id));
 
-      // Favorite hospital
-      const [favHospitals] = await db.query(
-        'SELECT 1 FROM favorite_hospitals WHERE user_id = ? AND hospital_id = ?',
-        [userId, hospitalId]
-      );
+      const [favHospitals] = await db.query('SELECT 1 FROM favorite_hospitals WHERE user_id = ? AND hospital_id = ?', [userId, hospitalId]);
       hospital.is_favorite = favHospitals.length > 0;
+      console.log('[INFO] GET /details/:hospital_id - user favorites checked for userId:', userId);
     } else {
       hospital.is_favorite = false;
     }
@@ -408,6 +190,7 @@ router.get('/details/:hospital_id', optionalAuth, async (req, res) => {
       doctors: doctorsByDept[dept.id] || [],
     }));
 
+    console.log('[SUCCESS] GET /details/:hospital_id - returning details for hospitalId:', hospitalId);
     return res.json({
       success: true,
       hospital: {
@@ -418,7 +201,7 @@ router.get('/details/:hospital_id', optionalAuth, async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Error fetching hospital details:', err);
+    console.error('[ERROR] GET /details/:hospital_id - Error fetching hospital details:', err && err.message, err && err.stack);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -427,7 +210,7 @@ router.get(
   '/hospitals/:hospitalId/doctors',
   optionalAuth,
   async (req, res) => {
-    console.log("working")
+    console.log('[INFO] GET /hospitals/:hospitalId/doctors - route hit. Params:', req.params, 'Query:', req.query);
     const { hospitalId } = req.params;
     let {
       department_id,
@@ -444,6 +227,7 @@ router.get(
     const hid = parseInt(hospitalId, 10);
 
     if (Number.isNaN(hid)) {
+      console.warn('[WARN] GET /hospitals/:hospitalId/doctors - Invalid hospitalId:', hospitalId);
       return res.status(400).json({ success: false, error: 'Invalid hospitalId' });
     }
 
@@ -485,6 +269,7 @@ router.get(
         // allow department_id from query strings (string -> int)
         const deptId = parseInt(department_id, 10);
         if (Number.isNaN(deptId)) {
+          console.warn('[WARN] GET /hospitals/:hospitalId/doctors - Invalid department_id:', department_id);
           return res.status(400).json({ success: false, error: 'Invalid department_id' });
         }
         whereClauses.push('hd.id = ?');
@@ -502,6 +287,7 @@ router.get(
       const countSQL = `SELECT COUNT(DISTINCT d.id) AS total ${baseFrom} ${favoriteJoin} ${whereSQL}`;
       const [countRows] = await db.query(countSQL, valuesForWhere);
       const total = countRows[0]?.total || 0;
+      console.log('[INFO] GET /hospitals/:hospitalId/doctors - total doctors found:', total);
 
       // Data query: select distinct doctors and group to avoid duplicates due to joins
       const dataSQL = `
@@ -520,6 +306,7 @@ router.get(
 
       const [rows] = await db.query(dataSQL, dataValues);
 
+      console.log('[SUCCESS] GET /hospitals/:hospitalId/doctors - returned rows:', rows.length);
       res.json({
         success: true,
         page,
@@ -528,24 +315,22 @@ router.get(
         doctors: rows
       });
     } catch (err) {
-      console.error(err);
+      console.error('[ERROR] GET /hospitals/:hospitalId/doctors -', err && err.message, err && err.stack);
       res.status(500).json({ success: false, error: 'Failed to fetch doctors' });
     }
   }
 );
 
-
-
-
-
 // Route: GET /hospitals/:hospitalId/doctors/:doctorId/details
 router.get('/hospitals/:hospitalId/doctors/:doctorId/details', async (req, res) => {
+  console.log('[INFO] GET /hospitals/:hospitalId/doctors/:doctorId/details - route hit. Params:', req.params);
   const { hospitalId, doctorId } = req.params;
 
   // basic validation
   const hid = parseInt(hospitalId, 10);
   const did = parseInt(doctorId, 10);
   if (Number.isNaN(hid) || Number.isNaN(did)) {
+    console.warn('[WARN] GET /hospitals/:hospitalId/doctors/:doctorId/details - Invalid ids:', hospitalId, doctorId);
     return res.status(400).json({ success: false, message: 'Invalid hospitalId or doctorId' });
   }
 
@@ -579,6 +364,7 @@ router.get('/hospitals/:hospitalId/doctors/:doctorId/details', async (req, res) 
     );
 
     if (doctorRows.length === 0) {
+      console.warn('[WARN] GET /hospitals/:hospitalId/doctors/:doctorId/details - Doctor not found for hospital. doctorId:', did, 'hospitalId:', hid);
       return res.status(404).json({ success: false, message: 'Doctor not found for this hospital.' });
     }
 
@@ -639,6 +425,7 @@ router.get('/hospitals/:hospitalId/doctors/:doctorId/details', async (req, res) 
 
     const consultation_fee = fees[0]?.consultation_fee ?? null;
 
+    console.log('[SUCCESS] GET /hospitals/:hospitalId/doctors/:doctorId/details - returning doctor details for doctorId:', did);
     res.json({
       success: true,
       doctor: {
@@ -651,104 +438,13 @@ router.get('/hospitals/:hospitalId/doctors/:doctorId/details', async (req, res) 
       }
     });
   } catch (error) {
-    console.error(error);
+    console.error('[ERROR] GET /hospitals/:hospitalId/doctors/:doctorId/details -', error && error.message, error && error.stack);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-
-
-
-// router.post('/appointments', authMiddleware, async (req, res) => {
-//   const {
-//     doctor_id,
-//     appointment_date,
-//     hospital_id,
-//     notes,
-//     patient
-//   } = req.body;
-
-//   if (!doctor_id || !appointment_date || !hospital_id || !patient || !patient.name || !patient.phone_number) {
-//     return res.status(400).json({ success: false, message: 'Missing required fields.' });
-//   }
-
-//   const {
-//     name,
-//     date_of_birth,
-//     gender,
-//     phone_number,
-//     email,
-//     address
-//   } = patient;
-
-//   try {
-//     const userId = req.user.id;
-
-//     // ✅ Validate hospital
-//     const [hospitalRows] = await db.query(`SELECT id FROM hospitals WHERE id = ?`, [hospital_id]);
-//     if (hospitalRows.length === 0) {
-//       return res.status(404).json({ success: false, message: 'Hospital not found.' });
-//     }
-
-//     // ✅ Validate doctor
-//     const [doctorRows] = await db.query(`SELECT id FROM doctors WHERE id = ?`, [doctor_id]);
-//     if (doctorRows.length === 0) {
-//       return res.status(404).json({ success: false, message: 'Doctor not found.' });
-//     }
-
-//     // ✅ Check how many appointments this user has today
-//     const [appointmentCountRows] = await db.query(
-//       `SELECT COUNT(*) AS count
-//        FROM appointments a
-//        JOIN patients p ON a.patient_id = p.id
-//        WHERE p.updatedby = ? AND DATE(a.appointment_date) = DATE(?)`,
-//       [userId, appointment_date]
-//     );
-
-//     if (appointmentCountRows[0].count >= 3) {
-//       return res.status(400).json({ success: false, message: 'You can only book up to 3 appointments per day.' });
-//     }
-
-//     // ✅ Insert patient
-//     const [insertPatientResult] = await db.query(
-//       `INSERT INTO patients (name, date_of_birth, gender, phone_number, email, address, updatedby)
-//        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-//       [name, date_of_birth, gender, phone_number, email, address, userId]
-//     );
-
-//     const patient_id = insertPatientResult.insertId;
-
-//     // ✅ Get next token for the doctor on the same day and hospital
-//     const [tokenRows] = await db.query(
-//       `SELECT MAX(token) AS maxToken
-//        FROM appointments
-//        WHERE doctor_id = ? AND hospital_id = ? AND DATE(appointment_date) = DATE(?)`,
-//       [doctor_id, hospital_id, appointment_date]
-//     );
-
-//     const nextToken = (tokenRows[0].maxToken || 0) + 1;
-
-//     // ✅ Insert appointment
-//     const [insertAppointmentResult] = await db.query(
-//       `INSERT INTO appointments (doctor_id, patient_id, hospital_id, patient_name, appointment_date, status, notes, token)
-//        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-//       [doctor_id, patient_id, hospital_id, name, appointment_date, 'pending', notes, nextToken]
-//     );
-
-//     res.json({
-//       success: true,
-//       message: 'Appointment created successfully.',
-//       appointment_id: insertAppointmentResult.insertId,
-//       token: nextToken,
-//       patient_id
-//     });
-
-//   } catch (error) {
-//     console.error('Error creating appointment:', error);
-//     res.status(500).json({ success: false, message: 'Server error.' });
-//   }
-// });
 router.post('/appointments', authMiddleware, async (req, res) => {
+  console.log('[INFO] POST /appointments - route hit. Body keys:', Object.keys(req.body || {}));
   const {
     doctor_id,
     appointment_date,
@@ -758,6 +454,7 @@ router.post('/appointments', authMiddleware, async (req, res) => {
   } = req.body;
 
   if (!doctor_id || !appointment_date || !hospital_id || !patient || !patient.name || !patient.phone_number) {
+    console.warn('[WARN] POST /appointments - Missing required fields');
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
@@ -776,12 +473,14 @@ router.post('/appointments', authMiddleware, async (req, res) => {
     // ✅ Validate hospital
     const [hospitalRows] = await db.query(`SELECT * FROM hospitals WHERE id = ?`, [hospital_id]);
     if (hospitalRows.length === 0) {
+      console.warn('[WARN] POST /appointments - Hospital not found:', hospital_id);
       return res.status(404).json({ success: false, message: 'Hospital not found.' });
     }
 
     // ✅ Validate doctor
     const [doctorRows] = await db.query(`SELECT * FROM doctors WHERE id = ?`, [doctor_id]);
     if (doctorRows.length === 0) {
+      console.warn('[WARN] POST /appointments - Doctor not found:', doctor_id);
       return res.status(404).json({ success: false, message: 'Doctor not found.' });
     }
 
@@ -795,6 +494,7 @@ router.post('/appointments', authMiddleware, async (req, res) => {
     );
 
     if (appointmentCountRows[0].count >= 3) {
+      console.warn('[WARN] POST /appointments - User exceeded daily appointment limit. userId:', userId);
       return res.status(400).json({ success: false, message: 'You can only book up to 3 appointments per day.' });
     }
 
@@ -806,6 +506,7 @@ router.post('/appointments', authMiddleware, async (req, res) => {
     );
 
     const patient_id = insertPatientResult.insertId;
+    console.log('[INFO] POST /appointments - patient inserted with id:', patient_id);
 
     // ✅ Get next token
     const [tokenRows] = await db.query(
@@ -816,6 +517,7 @@ router.post('/appointments', authMiddleware, async (req, res) => {
     );
 
     const nextToken = (tokenRows[0].maxToken || 0) + 1;
+    console.log('[INFO] POST /appointments - next token calculated:', nextToken);
 
     // ✅ Insert appointment
     const [insertAppointmentResult] = await db.query(
@@ -828,6 +530,7 @@ router.post('/appointments', authMiddleware, async (req, res) => {
     const [newPatientRows] = await db.query(`SELECT * FROM patients WHERE id = ?`, [patient_id]);
     const [newDoctorRows] = await db.query(`SELECT * FROM doctors WHERE id = ?`, [doctor_id]);
 
+    console.log('[SUCCESS] POST /appointments - appointment created id:', insertAppointmentResult.insertId);
     res.json({
       success: true,
       message: 'Appointment created successfully.',
@@ -840,12 +543,14 @@ router.post('/appointments', authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error creating appointment:', error);
+    console.error('[ERROR] POST /appointments - Error creating appointment:', error && error.message, error && error.stack);
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
+
 router.get('/appointments/details/:id', authMiddleware, async (req, res) => {
   const appointmentId = req.params.id;
+  console.log('[INFO] GET /appointments/details/:id - route hit. appointmentId:', appointmentId);
 
   try {
     const userId = req.user.id;
@@ -879,11 +584,13 @@ router.get('/appointments/details/:id', authMiddleware, async (req, res) => {
     `, [appointmentId, userId]);
 
     if (rows.length === 0) {
+      console.warn('[WARN] GET /appointments/details/:id - Appointment not found or access denied. appointmentId:', appointmentId, 'userId:', userId);
       return res.status(404).json({ success: false, message: 'Appointment not found or access denied.' });
     }
 
     const appointment = rows[0];
 
+    console.log('[SUCCESS] GET /appointments/details/:id - returning appointment id:', appointmentId);
     res.json({
       success: true,
       appointment: {
@@ -915,76 +622,14 @@ router.get('/appointments/details/:id', authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching appointment:', error);
+    console.error('[ERROR] GET /appointments/details/:id - Error fetching appointment:', error && error.message, error && error.stack);
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
 
-// router.get('/appointments/mine', authMiddleware, async (req, res) => {
-//   const userId = req.user.id; // from JWT token middleware
-//   const {
-//     start_date,
-//     end_date,
-//     doctor_id,
-//     hospital_id,
-//     status
-//   } = req.query;
-
-//   try {
-//     let query = `
-//       SELECT a.id, a.appointment_date, a.status, a.token, a.notes,
-//              a.patient_name, d.name AS doctor_name, h.name AS hospital_name
-//       FROM appointments a
-//       JOIN patients p ON a.patient_id = p.id
-//       LEFT JOIN doctors d ON a.doctor_id = d.id
-//       LEFT JOIN hospitals h ON a.hospital_id = h.id
-//       WHERE p.updatedby = ?
-//     `;
-
-//     const queryParams = [userId];
-
-//     if (start_date) {
-//       query += ' AND DATE(a.appointment_date) >= ?';
-//       queryParams.push(start_date);
-//     }
-
-//     if (end_date) {
-//       query += ' AND DATE(a.appointment_date) <= ?';
-//       queryParams.push(end_date);
-//     }
-
-//     if (doctor_id) {
-//       query += ' AND a.doctor_id = ?';
-//       queryParams.push(doctor_id);
-//     }
-
-//     if (hospital_id) {
-//       query += ' AND a.hospital_id = ?';
-//       queryParams.push(hospital_id);
-//     }
-
-//     if (status) {
-//       query += ' AND a.status = ?';
-//       queryParams.push(status);
-//     }
-
-//     query += ' ORDER BY a.appointment_date DESC';
-
-//     const [rows] = await db.query(query, queryParams);
-
-//     res.json({
-//       success: true,
-//       appointments: rows
-//     });
-//   } catch (err) {
-//     console.error('Error fetching appointments:', err);
-//     res.status(500).json({ success: false, message: 'Server error.' });
-//   }
-// });
-
-
 router.get('/appointments/mine', authMiddleware, async (req, res) => {
   const userId = req.user.id;
+  console.log('[INFO] GET /appointments/mine - route hit for userId:', userId);
 
   const {
     start_date,
@@ -1109,16 +754,18 @@ router.get('/appointments/mine', authMiddleware, async (req, res) => {
       }
     }));
 
+    console.log('[SUCCESS] GET /appointments/mine - returned appointments count:', appointments.length);
     res.json({ success: true, appointments });
 
   } catch (err) {
-    console.error('Error fetching appointments:', err);
+    console.error('[ERROR] GET /appointments/mine - Error fetching appointments:', err && err.message, err && err.stack);
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
 
 router.put('/appointments/:id/cancel', async (req, res) => {
   const { id } = req.params;
+  console.log('[INFO] PUT /appointments/:id/cancel - route hit. appointmentId:', id);
   // const { cancel_reason } = req.body
 
   try {
@@ -1129,11 +776,13 @@ router.put('/appointments/:id/cancel', async (req, res) => {
     );
 
     if (appointment.length === 0) {
+      console.warn('[WARN] PUT /appointments/:id/cancel - Appointment not found:', id);
       return res.status(404).json({ success: false, message: 'Appointment not found.' });
     }
 
     // Prevent double cancel
     if (appointment[0].status === 'cancelled') {
+      console.warn('[WARN] PUT /appointments/:id/cancel - Appointment already cancelled:', id);
       return res.status(400).json({ success: false, message: 'Appointment already cancelled.' });
     }
 
@@ -1145,15 +794,17 @@ router.put('/appointments/:id/cancel', async (req, res) => {
       [id]
     );
 
+    console.log('[SUCCESS] PUT /appointments/:id/cancel - Appointment cancelled:', id);
     res.json({ success: true, message: 'Appointment cancelled successfully.' });
 
   } catch (err) {
-    console.error(err);
+    console.error('[ERROR] PUT /appointments/:id/cancel -', err && err.message, err && err.stack);
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
 
 router.post('/favorites/doctors/toggle', authMiddleware, async (req, res) => {
+  console.log('[INFO] POST /favorites/doctors/toggle - route hit. Body:', req.body, 'user:', req.user?.id);
   const { doctor_id, hospital_id } = req.body;
   const user_id = req.user.id;
   try {
@@ -1168,6 +819,7 @@ router.post('/favorites/doctors/toggle', authMiddleware, async (req, res) => {
         'DELETE FROM favorite_doctors WHERE user_id = ? AND doctor_id = ? AND hospital_id = ?',
         [user_id, doctor_id, hospital_id]
       );
+      console.log('[SUCCESS] POST /favorites/doctors/toggle - Doctor removed from favorites. userId:', user_id, 'doctorId:', doctor_id);
       return res.json({ message: 'Doctor removed from favorites', status: false });
     } else {
       // Add if not favorited
@@ -1175,14 +827,17 @@ router.post('/favorites/doctors/toggle', authMiddleware, async (req, res) => {
         'INSERT INTO favorite_doctors (user_id, doctor_id, hospital_id) VALUES (?, ?, ?)',
         [user_id, doctor_id, hospital_id]
       );
+      console.log('[SUCCESS] POST /favorites/doctors/toggle - Doctor added to favorites. userId:', user_id, 'doctorId:', doctor_id);
       return res.json({ message: 'Doctor added to favorites', status: true });
     }
   } catch (err) {
+    console.error('[ERROR] POST /favorites/doctors/toggle -', err && err.message, err && err.stack);
     res.status(500).json({ error: err.message });
   }
 });
 
 router.post('/favorites/hospitals/toggle', authMiddleware, async (req, res) => {
+  console.log('[INFO] POST /favorites/hospitals/toggle - route hit. Body:', req.body, 'user:', req.user?.id);
   const { hospital_id } = req.body;
   const user_id = req.user.id;
 
@@ -1197,20 +852,25 @@ router.post('/favorites/hospitals/toggle', authMiddleware, async (req, res) => {
         'DELETE FROM favorite_hospitals WHERE user_id = ? AND hospital_id = ?',
         [user_id, hospital_id]
       );
+      console.log('[SUCCESS] POST /favorites/hospitals/toggle - Hospital removed from favorites. userId:', user_id, 'hospitalId:', hospital_id);
       return res.json({ message: 'Hospital removed from favorites', status: false });
     } else {
       await db.query(
         'INSERT INTO favorite_hospitals (user_id, hospital_id) VALUES (?, ?)',
         [user_id, hospital_id]
       );
+      console.log('[SUCCESS] POST /favorites/hospitals/toggle - Hospital added to favorites. userId:', user_id, 'hospitalId:', hospital_id);
       return res.json({ message: 'Hospital added to favorites', status: true });
     }
   } catch (err) {
+    console.error('[ERROR] POST /favorites/hospitals/toggle -', err && err.message, err && err.stack);
     res.status(500).json({ error: err.message });
   }
 });
+
 router.get('/favorites/all', authMiddleware, async (req, res) => {
   const user_id = req.user.id;
+  console.log('[INFO] GET /favorites/all - route hit for userId:', user_id);
 
   try {
     // Fetch favorite doctors
@@ -1249,20 +909,24 @@ router.get('/favorites/all', authMiddleware, async (req, res) => {
       [user_id]
     );
 
+    console.log('[SUCCESS] GET /favorites/all - fetched favorites. doctors:', doctors.length, 'hospitals:', hospitals.length);
     // Return separate arrays
     res.json({ doctors, hospitals });
 
   } catch (err) {
+    console.error('[ERROR] GET /favorites/all -', err && err.message, err && err.stack);
     res.status(500).json({ error: err.message });
   }
 });
 
 router.get('/ads/active', async (req, res) => {
+  console.log('[INFO] GET /ads/active - route hit');
   try {
     const [rows] = await db.query("SELECT * FROM advertisements WHERE is_active = 1");
+    console.log('[SUCCESS] GET /ads/active - active ads count:', rows.length);
     res.json(rows);
   } catch (err) {
-    console.error(err);
+    console.error('[ERROR] GET /ads/active -', err && err.message, err && err.stack);
     res.status(500).json({ message: "Server error" });
   }
 });

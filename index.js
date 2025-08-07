@@ -27,6 +27,7 @@ app.use('/hospital', hospital);
 app.use('/uploads', express.static(path.join(__dirname, 'routes', 'uploads')));
 
 app.use('/advertisement', express.static(path.join(__dirname, 'public','uploads','advertisement')));
+app.use('/upload', express.static(path.join(__dirname, 'public', 'uploads')));
 
 
 function getLocalIP() {

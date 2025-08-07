@@ -2,8 +2,24 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const multer = require('multer');
+const path = require('path');
 const { authMiddleware, checkRole, optionalAuth } = require('../middlewares/authMiddleware');
 router.use(express.json());
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadPath = path.join(__dirname, '..', 'public', 'uploads', 'profile');
+    cb(null, uploadPath); // ✅ This resolves to the correct absolute path
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const uniqueName = `profile_${Date.now()}${ext}`;
+    cb(null, uniqueName);
+  }
+});
+const upload = multer({ storage });
+
 
 // GET all users
 // GET all users (mocked without DB)
@@ -24,6 +40,45 @@ router.get('/', async (req, res) => {
   }
 });
 
+
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await db.query('SELECT id, username, email, phone_number, role, image_url FROM users WHERE id = ?', [req.user.id]);
+    if (rows.length === 0) return res.status(404).json({ message: 'User not found' });
+    res.json(rows[0]);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching profile', error });
+  }
+});
+
+router.put('/me', authMiddleware, upload.single('image'), async (req, res) => {
+  const { username, email, phone_number } = req.body;
+  const image_url = req.file ? `/upload/${req.file.filename}` : null;
+
+  try {
+    const fields = [];
+    const values = [];
+
+    if (username) { fields.push('username = ?'); values.push(username); }
+    if (email) { fields.push('email = ?'); values.push(email); }
+    if (phone_number) { fields.push('phone_number = ?'); values.push(phone_number); }
+    // if (role) { fields.push('role = ?'); values.push(role); }
+    if (image_url) { fields.push('image_url = ?'); values.push(image_url); }
+
+    if (fields.length === 0) return res.status(400).json({ message: 'No fields to update' });
+
+    values.push(req.user.id);
+
+    const query = `UPDATE users SET ${fields.join(', ')} WHERE id = ?`;
+    await db.query(query, values);
+
+    const [updatedUser] = await db.query('SELECT id, username, email, phone_number, role, image_url FROM users WHERE id = ?', [req.user.id]);
+    res.json(updatedUser[0]);
+  } catch (error) {
+    console.error('Update error:', error);
+    res.status(500).json({ message: 'Error updating profile', error });
+  }
+});
 router.get('/hospitals/nearby', optionalAuth, async (req, res) => {
   console.log('[INFO] GET /hospitals/nearby - route hit. Query:', req.query);
   const {

@@ -5,7 +5,8 @@ CREATE TABLE users (
   password VARCHAR(255) NOT NULL,
   role VARCHAR(255),
   email VARCHAR(255) NULL UNIQUE,
-  phone_number VARCHAR(255)
+  phone_number VARCHAR(255),
+  image_url VARCHAR(500)
 );
 
 -- OTPS TABLE

@@ -52,7 +52,7 @@ router.get('/me', authMiddleware, async (req, res) => {
 });
 
 router.put('/me', authMiddleware, upload.single('image'), async (req, res) => {
-  const { username, email, phone_number } = req.body;
+  const { username, email, phone_number,Fullname } = req.body;
   const image_url = req.file ? `/upload/${req.file.filename}` : null;
 
   try {
@@ -62,7 +62,7 @@ router.put('/me', authMiddleware, upload.single('image'), async (req, res) => {
     if (username) { fields.push('username = ?'); values.push(username); }
     if (email) { fields.push('email = ?'); values.push(email); }
     if (phone_number) { fields.push('phone_number = ?'); values.push(phone_number); }
-    // if (role) { fields.push('role = ?'); values.push(role); }
+    if (Fullname) { fields.push('Fullname = ?'); values.push(Fullname); }
     if (image_url) { fields.push('image_url = ?'); values.push(image_url); }
 
     if (fields.length === 0) return res.status(400).json({ message: 'No fields to update' });

@@ -17,6 +17,7 @@ app.use(cors({
 // ✅ Enable JSON parsing
 app.use(express.json());
 
+
 // ✅ Mount routes
 app.use('/auth', authRoutes);
 app.use('/users', userRoutes);
@@ -24,10 +25,11 @@ app.use('/admin', admin);
 app.use('/doctor', doctor);
 app.use('/hospital', hospital);
 
-app.use('/uploads', express.static(path.join(__dirname, 'routes', 'uploads')));
 
+app.use('/uploads', express.static(path.join(__dirname, 'routes', 'uploads')));
 app.use('/advertisement', express.static(path.join(__dirname, 'public','uploads','advertisement')));
-app.use('/upload', express.static(path.join(__dirname, 'public', 'uploads')));
+app.use('/upload', express.static(path.join(__dirname, 'public', 'uploads','profile')));
+
 
 
 function getLocalIP() {
@@ -48,7 +50,7 @@ const server = app.listen(5000, "0.0.0.0", () => {
   const { port } = server.address();
   const ip = getLocalIP();
   console.log(`✅ Server running on:`);
-  console.log(`   Local:   http://localhost:${port}`);
-  console.log(`   Network: http://${ip}:${port}`);
+  console.log(` Local:   http://localhost:${port}`);
+  console.log(` Network: http://${ip}:${port}`);
   console.log("✅ Database connected successfully!");
 });
